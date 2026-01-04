@@ -1,33 +1,65 @@
 "use client";
 
 import React, { useState } from 'react';
-import { ArrowRight, Github, Wand2, Terminal, Loader2, CheckCircle2, Copy, Sparkles } from 'lucide-react';
+import { ArrowRight, Github, Wand2, Terminal, Loader2, CheckCircle2, Copy, Sparkles, LogOut } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { useSession, signIn, signOut } from "next-auth/react";
 
 export default function Home() {
+  const { data: session, status } = useSession();
   const [repoUrl, setRepoUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
   const [error, setError] = useState('');
 
   const handleGenerate = async () => {
+    if (!session) {
+      setError('Please sign in with GitHub first');
+      return;
+    }
+
+    // Debug logging - Check session data
+    console.log('🔍 Session Debug:', {
+      hasSession: !!session,
+      user: session.user?.name,
+      email: session.user?.email,
+      hasAccessToken: !!(session as any).accessToken,
+      sessionKeys: Object.keys(session),
+      fullSession: session
+    });
+
     if (!repoUrl) return setError('Please enter a GitHub URL');
+    
     setLoading(true);
     setError('');
     setResult('');
 
     try {
+      console.log('📤 Sending request to /api/generate');
+      console.log('📦 Request payload:', { repoUrl });
+
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repoUrl }),
       });
 
+      console.log('📥 Response status:', response.status);
+      console.log('📥 Response headers:', Object.fromEntries(response.headers.entries()));
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ Error response:', errorData);
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+
       const data = await response.json();
-      if (data.error) throw new Error(data.error);
+      console.log('✅ Success! Data received');
+      console.log('📊 Response metadata:', data.meta);
       
       setResult(data.markdown);
     } catch (err: any) {
+      console.error('💥 Generation error:', err);
       setError(err.message || 'Something went wrong. Check your API keys.');
     } finally {
       setLoading(false);
@@ -36,8 +68,17 @@ export default function Home() {
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(result);
-    // Simple notification logic could go here
+    console.log('📋 Copied to clipboard');
   };
+
+  // Debug session changes
+  React.useEffect(() => {
+    console.log('🔄 Session status changed:', status);
+    if (session) {
+      console.log('✅ User signed in:', session.user?.name);
+      console.log('🔑 Access token present:', !!(session as any).accessToken);
+    }
+  }, [session, status]);
 
   return (
     <main className="min-h-screen bg-[#030712] text-slate-200 selection:bg-blue-500/30">
@@ -57,9 +98,46 @@ export default function Home() {
           <a href="#" className="hover:text-white transition-colors">Enterprise</a>
           <a href="#" className="hover:text-white transition-colors">API docs</a>
         </div>
-        <button className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-full text-sm font-medium transition-all">
-          Star on GitHub
-        </button>
+        
+        {/* Auth Button */}
+        {status === "loading" ? (
+          <div className="bg-slate-800 px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Loading...</span>
+          </div>
+        ) : session ? (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-slate-800/50 px-4 py-2 rounded-full">
+              <img 
+                src={session.user?.image || ''} 
+                alt="Avatar" 
+                className="w-6 h-6 rounded-full"
+              />
+              <span className="text-sm font-medium">{session.user?.name}</span>
+            </div>
+            <button 
+              onClick={() => {
+                console.log('🚪 Signing out...');
+                signOut();
+              }}
+              className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              Sign Out
+            </button>
+          </div>
+        ) : (
+          <button 
+            onClick={() => {
+              console.log('🔐 Initiating GitHub sign in...');
+              signIn('github');
+            }}
+            className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2"
+          >
+            <Github className="w-4 h-4" />
+            Sign In with GitHub
+          </button>
+        )}
       </nav>
 
       {/* Hero Section */}
@@ -69,7 +147,7 @@ export default function Home() {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
           </span>
-          AI-Powered Repo Analysis is Live
+          {session ? '✨ Unlimited README Generation' : 'Sign In to Get Started'}
         </div>
 
         <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-6 bg-gradient-to-b from-white to-slate-400 bg-clip-text text-transparent">
@@ -77,8 +155,10 @@ export default function Home() {
         </h1>
         
         <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-          Paste a link. Get a professional, verified, and visually stunning documentation suite. 
-          101% accurate installation steps guaranteed.
+          {session 
+            ? 'Paste a link. Get a professional, verified, and visually stunning documentation suite. 101% accurate installation steps guaranteed.'
+            : 'Sign in with GitHub to generate unlimited professional READMEs using your own repositories.'
+          }
         </p>
 
         {/* Input Area */}
@@ -89,13 +169,14 @@ export default function Home() {
               <input 
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)}
-                placeholder="https://github.com/username/repo" 
-                className="bg-transparent w-full outline-none text-white placeholder:text-slate-600"
+                placeholder={session ? "https://github.com/username/repo" : "Sign in to start generating"}
+                disabled={!session}
+                className="bg-transparent w-full outline-none text-white placeholder:text-slate-600 disabled:opacity-50"
               />
             </div>
             <button 
               onClick={handleGenerate}
-              disabled={loading}
+              disabled={loading || !session}
               className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95"
             >
               {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />}
